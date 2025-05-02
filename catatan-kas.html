@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Catatan Kas Lengkap</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body class="bg-gray-100 p-6 min-h-screen">
+    <div class="max-w-4xl mx-auto bg-white p-6 rounded-xl shadow-md">
+      <h1 class="text-2xl font-bold mb-4">Catatan Kas</h1>
+
+      <!-- Form -->
+      <form id="kas-form" class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <input
+          id="desc"
+          type="text"
+          placeholder="Deskripsi"
+          required
+          class="p-2 border rounded col-span-2"
+        />
+        <input
+          id="amount"
+          type="number"
+          placeholder="Jumlah"
+          required
+          class="p-2 border rounded"
+        />
+        <select id="type" required class="p-2 border rounded">
+          <option value="income">Pemasukan</option>
+          <option value="expense">Pengeluaran</option>
+        </select>
+        <input id="date" type="date" required class="p-2 border rounded" />
+        <button
+          type="submit"
+          class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          Tambah
+        </button>
+      </form>
+
+      <!-- Filter -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <input type="date" id="filter-start" class="p-2 border rounded" />
+        <input type="date" id="filter-end" class="p-2 border rounded" />
+        <button
+          onclick="applyFilter()"
+          class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+        >
+          Filter
+        </button>
+        <button
+          onclick="resetFilter()"
+          class="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500"
+        >
+          Reset
+        </button>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex flex-wrap gap-2 mb-4">
+        <button
+          onclick="exportCSV()"
+          class="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
+        >
+          Export CSV
+        </button>
+        <button
+          onclick="resetData()"
+          class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+        >
+          Reset Semua Data
+        </button>
+      </div>
+
+      <!-- Total -->
+      <div class="mb-4 font-semibold">
+        Saldo Total: <span id="total" class="text-lg text-blue-700">Rp0</span>
+      </div>
+
+      <!-- Chart -->
+      <canvas id="chart" class="mb-6"></canvas>
+
+      <!-- List -->
+      <ul id="list" class="space-y-2"></ul>
+    </div>
+
+    <script>
+      const form = document.getElementById("kas-form");
+      const descInput = document.getElementById("desc");
+      const amountInput = document.getElementById("amount");
+      const typeInput = document.getElementById("type");
+      const dateInput = document.getElementById("date");
+      const list = document.getElementById("list");
+      const totalEl = document.getElementById("total");
+      const startFilter = document.getElementById("filter-start");
+      const endFilter = document.getElementById("filter-end");
+      const chartEl = document.getElementById("chart");
+      let kasData = JSON.parse(localStorage.getItem("kasData")) || [];
+      let currentFilter = null;
+      let editIndex = null;
+      let chartInstance;
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const desc = descInput.value.trim();
+        const amount = parseInt(amountInput.value);
+        const type = typeInput.value;
+        const date = dateInput.value;
+
+        if (!desc || isNaN(amount) || !date) return;
+
+        const entry = { desc, amount, type, date };
+
+        if (editIndex !== null) {
+          kasData[editIndex] = entry;
+          editIndex = null;
+        } else {
+          kasData.push(entry);
+        }
+
+        form.reset();
+        saveData();
+        render();
+      });
+
+      function saveData() {
+        localStorage.setItem("kasData", JSON.stringify(kasData));
+      }
+
+      function deleteItem(index) {
+        kasData.splice(index, 1);
+        saveData();
+        render();
+      }
+
+      function editItem(index) {
+        const item = kasData[index];
+        descInput.value = item.desc;
+        amountInput.value = item.amount;
+        typeInput.value = item.type;
+        dateInput.value = item.date;
+        editIndex = index;
+      }
+
+      function applyFilter() {
+        const start = startFilter.value;
+        const end = endFilter.value;
+        currentFilter = { start, end };
+        render();
+      }
+
+      function resetFilter() {
+        currentFilter = null;
+        startFilter.value = "";
+        endFilter.value = "";
+        render();
+      }
+
+      function resetData() {
+        if (confirm("Yakin ingin menghapus semua data?")) {
+          kasData = [];
+          saveData();
+          render();
+        }
+      }
+
+      function exportCSV() {
+        let csv = "Deskripsi,Jumlah,Jenis,Tanggal\n";
+        kasData.forEach((item) => {
+          csv += `${item.desc},${item.amount},${item.type},${item.date}\n`;
+        });
+        const blob = new Blob([csv], { type: "text/csv" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "catatan_kas.csv";
+        link.click();
+      }
+
+      function render() {
+        list.innerHTML = "";
+        let total = 0;
+        const filtered = kasData.filter((item) => {
+          if (!currentFilter) return true;
+          const date = item.date;
+          return (
+            (!currentFilter.start || date >= currentFilter.start) &&
+            (!currentFilter.end || date <= currentFilter.end)
+          );
+        });
+
+        filtered.forEach((item, index) => {
+          const nominal = item.type === "income" ? item.amount : -item.amount;
+          total += nominal;
+
+          const li = document.createElement("li");
+          li.className =
+            "bg-gray-100 p-3 rounded flex justify-between items-center";
+          li.innerHTML = `
+          <div>
+            <p class="font-medium">${item.desc}</p>
+            <p class="text-sm text-gray-600">${
+              item.type === "income" ? "Pemasukan" : "Pengeluaran"
+            } • ${item.date} • Rp${item.amount.toLocaleString()}</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="editItem(${kasData.indexOf(
+              item
+            )})" class="text-blue-500 hover:text-blue-700">Edit</button>
+            <button onclick="deleteItem(${kasData.indexOf(
+              item
+            )})" class="text-red-500 hover:text-red-700">Hapus</button>
+          </div>
+        `;
+          list.appendChild(li);
+        });
+
+        totalEl.textContent = "Rp" + total.toLocaleString();
+        renderChart(filtered);
+      }
+
+      function renderChart(data) {
+        const dailyTotals = {};
+
+        data.forEach((item) => {
+          const date = item.date;
+          const nominal = item.type === "income" ? item.amount : -item.amount;
+          dailyTotals[date] = (dailyTotals[date] || 0) + nominal;
+        });
+
+        const dates = Object.keys(dailyTotals).sort();
+        const values = dates.reduce((acc, date, i) => {
+          acc.push((acc[i - 1] || 0) + dailyTotals[date]);
+          return acc;
+        }, []);
+
+        if (chartInstance) chartInstance.destroy();
+
+        chartInstance = new Chart(chartEl, {
+          type: "line",
+          data: {
+            labels: dates,
+            datasets: [
+              {
+                label: "Saldo Harian",
+                data: values,
+                borderColor: "rgb(59, 130, 246)",
+                backgroundColor: "rgba(59, 130, 246, 0.2)",
+                fill: true,
+                tension: 0.3,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+            },
+            scales: {
+              y: { beginAtZero: true },
+            },
+          },
+        });
+      }
+
+      // Inisialisasi
+      render();
+    </script>
+  </body>
+</html>
